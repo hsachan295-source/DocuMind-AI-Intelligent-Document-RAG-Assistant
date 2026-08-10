@@ -81,23 +81,25 @@ index = pc.Index(INDEX_NAME)
 vectorstore = PineconeVectorStore(index=index, embedding=embeddings)
 
 
-def add_documents_safely(vstore, chunks, batch_size: int = 50, delay_seconds: float = 0.5) -> None:
+def add_documents_safely(vstore, chunks, batch_size: int = 15, delay_seconds: float = 0.5) -> None:
     """
-    Upserts documents into Pinecone vectorstore in batches with retry handling.
-    Batch size 50 with subtle delay ensures fast ingestion without API rate limit errors.
+    Upserts documents into Pinecone vectorstore in small batches with retry & backoff handling.
+    Batch size 15 with subtle delay ensures fast ingestion without API rate limit errors (429 RESOURCE_EXHAUSTED).
     """
     total = len(chunks)
     for i in range(0, total, batch_size):
         batch = chunks[i : i + batch_size]
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 vstore.add_documents(batch)
                 break
             except Exception as e:
                 err_str = str(e)
-                if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str) and attempt < max_retries - 1:
-                    time.sleep(3)
+                if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    print(f"[config] Gemini rate limit encountered (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
                 else:
                     raise e
         if delay_seconds > 0 and i + batch_size < total:
