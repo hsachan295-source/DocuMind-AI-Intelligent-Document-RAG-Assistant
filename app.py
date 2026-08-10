@@ -83,8 +83,8 @@ def _run_ingest(file_path: str) -> None:
         except Exception:
             pass  # index may be empty — that's fine
 
-        # Embed + upsert (Rate-limit safe batching with automatic retry)
-        add_documents_safely(vectorstore, chunks, batch_size=15, delay_seconds=0.5)
+        # Embed + upsert (Instant FastEmbed local embeddings with zero rate limits)
+        add_documents_safely(vectorstore, chunks, batch_size=100, delay_seconds=0.0)
         state["status"] = "ready"
 
     except Exception as exc:
