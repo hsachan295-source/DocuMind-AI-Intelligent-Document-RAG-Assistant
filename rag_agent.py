@@ -39,7 +39,10 @@ def get_context(query: str) -> str:
     for the given query. Always call this tool before answering any question.
     """
     global last_retrieved_sources
-    docs = vectorstore.similarity_search(query, k=4)
+    TOP_K = 5
+    docs = vectorstore.similarity_search(query, k=TOP_K)
+    print(f"[RAG RETRIEVAL] Query: '{query}' -> top_k={len(docs)} chunks retrieved from Pinecone.")
+    
     if not docs:
         last_retrieved_sources = []
         return "No relevant information found in the document."
@@ -48,11 +51,21 @@ def get_context(query: str) -> str:
     passages = []
     for i, doc in enumerate(docs, 1):
         page = doc.metadata.get("page", None)
-        seq = doc.metadata.get("seq_num", doc.metadata.get("chunk", i))
-        passages.append(f"[Passage {i} | Page {page if page is not None else '?'}]\n{doc.page_content.strip()}")
+        section = doc.metadata.get("section", None)
+        seq = doc.metadata.get("chunk_index", doc.metadata.get("seq_num", doc.metadata.get("chunk", i)))
+        
+        header_parts = [f"Passage {i}"]
+        if page is not None:
+            header_parts.append(f"Page {int(page) if isinstance(page, (int, float)) else page}")
+        if section:
+            header_parts.append(f"Section: {section}")
+            
+        header_str = f"[{' | '.join(header_parts)}]"
+        passages.append(f"{header_str}\n{doc.page_content.strip()}")
         
         last_retrieved_sources.append({
             "page": page,
+            "section": section,
             "chunk": seq
         })
 
