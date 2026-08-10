@@ -1,31 +1,50 @@
 """
 config.py — Shared setup for embeddings, Pinecone index, and vector store.
 
-Embeddings model: models/gemini-embedding-001 (3072 dimensions)
-Pinecone index is auto-created or validated on startup (3072-dim, cosine metric).
+Embeddings model: Google Gemini Embedding API (models/gemini-embedding-001, 768-dim)
+Pinecone index is auto-created or validated on startup (768-dim, cosine metric).
 """
 
 import os
 import time
 from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
-# ── 1. Load environment variables ──────────────────────────────────────────
+# ── 1. Load & Validate Environment Variables ────────────────────────────────
 load_dotenv()
 
-GOOGLE_API_KEY     = os.environ.get("GOOGLE_API_KEY", "").strip()
-PINECONE_API_KEY   = os.environ["PINECONE_API_KEY"].strip()
-INDEX_NAME         = os.getenv("PINECONE_INDEX_NAME", "ragtext").strip()
+GOOGLE_API_KEY   = os.environ.get("GOOGLE_API_KEY", "").strip()
+GROQ_API_KEY     = os.environ.get("GROQ_API_KEY", "").strip()
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "").strip()
+INDEX_NAME       = os.getenv("PINECONE_INDEX_NAME", "ragtext").strip()
 
-EMBEDDING_MODEL    = "all-MiniLM-L6-v2"
-EMBEDDING_DIM      = 384
+missing_keys = []
+if not GOOGLE_API_KEY:
+    missing_keys.append("GOOGLE_API_KEY")
+if not GROQ_API_KEY:
+    missing_keys.append("GROQ_API_KEY")
+if not PINECONE_API_KEY:
+    missing_keys.append("PINECONE_API_KEY")
 
-# ── 2. Local HuggingFace embeddings (Fast & 0 Rate Limits) ───────────────────
-embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+if missing_keys:
+    raise ValueError(
+        f"[config] Missing required environment variables: {', '.join(missing_keys)}. "
+        "Please specify them in your .env file or deployment environment settings."
+    )
 
-# ── 3. Pinecone client & index management ───────────────────────────────────
+EMBEDDING_MODEL = "models/gemini-embedding-001"
+EMBEDDING_DIM   = 768
+
+# ── 2. Google Gemini API Embeddings (Zero PyTorch/CUDA overhead) ──────────────
+embeddings = GoogleGenerativeAIEmbeddings(
+    model=EMBEDDING_MODEL,
+    google_api_key=GOOGLE_API_KEY,
+    output_dimensionality=EMBEDDING_DIM,
+)
+
+# ── 3. Pinecone Client & Index Dimension Management ─────────────────────────
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
 existing_indexes = [idx.name for idx in pc.list_indexes()]
@@ -33,13 +52,17 @@ existing_indexes = [idx.name for idx in pc.list_indexes()]
 if INDEX_NAME in existing_indexes:
     desc = pc.describe_index(INDEX_NAME)
     if desc.dimension != EMBEDDING_DIM:
-        print(f"[config] Dimension mismatch (existing={desc.dimension}, required={EMBEDDING_DIM}). Recreating index '{INDEX_NAME}'...")
+        print(
+            f"[config] Dimension mismatch detected for index '{INDEX_NAME}' "
+            f"(existing={desc.dimension}, required={EMBEDDING_DIM}). "
+            "Recreating index with correct 768 dimensions for Google Gemini embeddings..."
+        )
         pc.delete_index(INDEX_NAME)
-        time.sleep(2)
+        time.sleep(3)
         existing_indexes.remove(INDEX_NAME)
 
 if INDEX_NAME not in existing_indexes:
-    print(f"[config] Creating Pinecone index '{INDEX_NAME}' ({EMBEDDING_DIM}-dim, cosine) ...")
+    print(f"[config] Creating Pinecone index '{INDEX_NAME}' ({EMBEDDING_DIM}-dim, cosine metric)...")
     pc.create_index(
         name=INDEX_NAME,
         dimension=EMBEDDING_DIM,
@@ -48,20 +71,20 @@ if INDEX_NAME not in existing_indexes:
     )
     while not pc.describe_index(INDEX_NAME).status["ready"]:
         time.sleep(1)
-    print(f"[config] Index '{INDEX_NAME}' is ready.")
+    print(f"[config] Pinecone index '{INDEX_NAME}' is ready.")
 else:
-    print(f"[config] Using existing Pinecone index '{INDEX_NAME}'.")
+    print(f"[config] Using existing Pinecone index '{INDEX_NAME}' ({EMBEDDING_DIM}-dim).")
 
 index = pc.Index(INDEX_NAME)
 
-# ── 4. LangChain vector store wrapper ──────────────────────────────────────
+# ── 4. LangChain Vector Store Wrapper ──────────────────────────────────────
 vectorstore = PineconeVectorStore(index=index, embedding=embeddings)
 
 
-def add_documents_safely(vstore, chunks, batch_size: int = 100, delay_seconds: float = 0.0) -> None:
+def add_documents_safely(vstore, chunks, batch_size: int = 50, delay_seconds: float = 0.5) -> None:
     """
-    Upserts documents into Pinecone vectorstore in batches.
-    Uses local HuggingFace embeddings for instant 2-3 second ingestion with zero rate limits.
+    Upserts documents into Pinecone vectorstore in batches with retry handling.
+    Batch size 50 with subtle delay ensures fast ingestion without API rate limit errors.
     """
     total = len(chunks)
     for i in range(0, total, batch_size):
@@ -79,4 +102,3 @@ def add_documents_safely(vstore, chunks, batch_size: int = 100, delay_seconds: f
                     raise e
         if delay_seconds > 0 and i + batch_size < total:
             time.sleep(delay_seconds)
-
