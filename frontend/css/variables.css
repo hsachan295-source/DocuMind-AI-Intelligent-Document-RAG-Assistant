@@ -1,0 +1,56 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM TOKENS & THEMING
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Color Palette */
+  --bg:            #06060f;
+  --bg-subtle:     #0b0b1a;
+  --surface:       rgba(14, 14, 32, 0.85);
+  --surface-hover: rgba(22, 22, 48, 0.9);
+  --card:          rgba(255, 255, 255, 0.04);
+  --card-hover:    rgba(255, 255, 255, 0.07);
+  --card-active:   rgba(99, 102, 241, 0.12);
+  
+  /* Borders & Glows */
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-focus:  rgba(99, 102, 241, 0.6);
+  --glow-primary:  rgba(99, 102, 241, 0.25);
+  --glow-violet:   rgba(139, 92, 246, 0.25);
+  --glow-cyan:     rgba(14, 165, 233, 0.2);
+
+  /* Primary & Accent Gradients */
+  --primary:       #6366f1;
+  --primary-dark:  #4f46e5;
+  --violet:        #8b5cf6;
+  --cyan:          #0ea5e9;
+  --pink:          #ec4899;
+
+  /* Status Colors */
+  --success:       #10b981;
+  --success-bg:    rgba(16, 185, 129, 0.12);
+  --warning:       #f59e0b;
+  --warning-bg:    rgba(245, 158, 11, 0.12);
+  --error:         #ef4444;
+  --error-bg:      rgba(239, 68, 68, 0.12);
+  --info:          #3b82f6;
+
+  /* Typography */
+  --txt:           #f1f5f9;
+  --txt2:          #94a3b8;
+  --txt3:          #64748b;
+  --txt4:          #475569;
+
+  /* Border Radii */
+  --r-sm:          8px;
+  --r-md:          12px;
+  --r-lg:          18px;
+  --r-xl:          24px;
+  --r-full:        9999px;
+
+  /* Transitions */
+  --transition-fast: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-bounce: 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}

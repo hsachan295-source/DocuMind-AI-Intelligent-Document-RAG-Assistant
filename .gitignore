@@ -1,0 +1,21 @@
+# Environment variables
+.env
+*.env
+
+# Python & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# User uploads & temporary files
+uploads/*
+!uploads/.gitkeep
