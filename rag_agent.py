@@ -28,21 +28,33 @@ from config import vectorstore
 
 # ── 1. Retrieval tool ───────────────────────────────────────────────────────
 
+# ── 1. Retrieval tool & Source tracking ──────────────────────────────────────
+
+last_retrieved_sources = []
+
 @tool
 def get_context(query: str) -> str:
     """
-    Search the PDF knowledge base and return the most relevant text passages
-    for the given query. Always call this tool before answering any question
-    about the document.
+    Search the document knowledge base and return the most relevant text passages
+    for the given query. Always call this tool before answering any question.
     """
+    global last_retrieved_sources
     docs = vectorstore.similarity_search(query, k=4)
     if not docs:
+        last_retrieved_sources = []
         return "No relevant information found in the document."
 
+    last_retrieved_sources = []
     passages = []
     for i, doc in enumerate(docs, 1):
-        page = doc.metadata.get("page", "?")
-        passages.append(f"[Passage {i} | Page {page}]\n{doc.page_content.strip()}")
+        page = doc.metadata.get("page", None)
+        seq = doc.metadata.get("seq_num", doc.metadata.get("chunk", i))
+        passages.append(f"[Passage {i} | Page {page if page is not None else '?'}]\n{doc.page_content.strip()}")
+        
+        last_retrieved_sources.append({
+            "page": page,
+            "chunk": seq
+        })
 
     return "\n\n---\n\n".join(passages)
 
@@ -59,16 +71,29 @@ llm = ChatGroq(
 
 # ── 3. System prompt ────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a helpful PDF assistant. Your job is to answer questions
-strictly based on the document that has been indexed. Follow these rules:
+SYSTEM_PROMPT = """You are a professional AI Document Assistant. Your job is to answer questions
+strictly based on the document passages provided.
 
-1. ALWAYS use the get_context tool first before answering any question.
-2. Base your answer ONLY on the retrieved passages — do not use outside knowledge.
-3. If the retrieved passages do not contain enough information, say:
-   "The document does not contain enough information to answer this question."
-4. Quote or paraphrase from the passages to support your answer.
-5. Keep answers clear, concise, and well-structured.
-6. If asked to summarise, cover the key points from all retrieved passages."""
+Follow these strict output formatting and structure rules for EVERY answer:
+
+1. HEADINGS & SECTIONS:
+   - Always start with a clear main heading (e.g. "## Answer" or "## [Topic Title]").
+   - Group long explanations into logical sections using numbered subheadings (e.g. "### 1. Section Name", "### 2. Section Name").
+
+2. LISTS & TYPOGRAPHY:
+   - Use numbered lists (1., 2.) for step-by-step instructions or sequential information.
+   - Use bullet points (-) for listing multiple details or fields.
+   - Use sub-bullets for related sub-details.
+   - Use **bold text** for key terms, field names, metrics, and status labels.
+
+3. STRUCTURED DATA & TABLES:
+   - When presenting comparisons, multi-field properties, parameters, or structured data, render them as a clean Markdown table (| Field | Details |).
+
+4. TRUTHFULNESS & STICK TO CONTEXT:
+   - Base your answer ONLY on the retrieved passages — do not use outside knowledge.
+   - If the retrieved passages do not contain enough information, state clearly:
+     "The document does not contain enough information to answer this question."
+   - Do NOT invent fake page numbers, fake citations, fake confidence scores, or fake metadata."""
 
 # ── 4. Prompt template ──────────────────────────────────────────────────────
 
@@ -108,6 +133,17 @@ def ask(question: str) -> str:
         ]
         res = llm.invoke(fallback_messages)
         return res.content
+
+
+def ask_with_sources(question: str) -> dict:
+    """Run question through the pipeline and return answer string with retrieved source metadata."""
+    global last_retrieved_sources
+    last_retrieved_sources = []
+    answer_text = ask(question)
+    return {
+        "answer": answer_text,
+        "sources": last_retrieved_sources
+    }
 
 
 def chat_loop() -> None:

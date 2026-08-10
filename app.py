@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import vectorstore, index as pinecone_index, add_documents_safely
-from rag_agent import ask
+from rag_agent import ask, ask_with_sources
 
 # ── App ─────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Document RAG Assistant")
@@ -126,15 +126,19 @@ async def ask_question(body: QuestionBody):
     if state["status"] != "ready":
         raise HTTPException(
             status_code=400,
-            detail="PDF not ready yet. Upload a PDF and wait for processing to complete.",
+            detail="Document not ready yet. Upload a document and wait for processing to complete.",
         )
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     try:
         loop = asyncio.get_running_loop()
-        answer = await loop.run_in_executor(executor, ask, body.question.strip())
-        return {"answer": answer, "filename": state["filename"]}
+        res = await loop.run_in_executor(executor, ask_with_sources, body.question.strip())
+        return {
+            "answer": res["answer"],
+            "filename": state["filename"],
+            "sources": res.get("sources", [])
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

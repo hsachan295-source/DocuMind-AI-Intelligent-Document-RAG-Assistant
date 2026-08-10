@@ -109,6 +109,24 @@ export function createPrediction() {
     if (fileInput.files[0]) handleUpload(fileInput.files[0]);
   });
 
+  // Sync state on component load if document is already ready
+  fetchStatus().then(res => {
+    if (res && res.status === 'ready') {
+      stateManager.update({
+        status: 'ready',
+        filename: res.filename,
+        pages: res.pages,
+        chunks: res.chunks
+      });
+      fileName.textContent = res.filename || 'Document';
+      fileMeta.textContent = `${res.pages || 0} pages · ${res.chunks || 0} chunks`;
+      fileCard.style.display = 'flex';
+      qInput.disabled = false;
+      sendBtn.disabled = false;
+      qInput.placeholder = `Ask anything about ${res.filename || 'your document'}…`;
+    }
+  }).catch(() => {});
+
   async function handleUpload(file) {
     stateManager.update({ status: 'processing', filename: file.name, fileSize: file.size });
     
@@ -177,7 +195,10 @@ export function createPrediction() {
   }
 
   // Question Submission Logic
-  sendBtn.addEventListener('click', submitQuestion);
+  let lastSubmittedQuestion = '';
+
+  // Question Submission Logic
+  sendBtn.addEventListener('click', () => submitQuestion());
   qInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -185,14 +206,18 @@ export function createPrediction() {
     }
   });
 
-  async function submitQuestion() {
-    const q = qInput.value.trim();
+  async function submitQuestion(overrideQuestion) {
+    const q = overrideQuestion || qInput.value.trim();
     const currentState = stateManager.get();
     if (!q || currentState.isBusy || currentState.status !== 'ready') return;
 
+    lastSubmittedQuestion = q;
     if (chatEmpty) chatEmpty.style.display = 'none';
-    appendMessage('user', q);
-    qInput.value = '';
+
+    if (!overrideQuestion) {
+      appendUserMessage(q);
+      qInput.value = '';
+    }
 
     stateManager.update({ isBusy: true });
     qInput.disabled = true;
@@ -203,11 +228,11 @@ export function createPrediction() {
     try {
       const res = await askQuestion(q);
       typingEl.remove();
-      appendMessage('ai', res.answer);
+      appendAiResponseCard(res.answer, res.filename || currentState.filename, res.sources || []);
       stateManager.addHistoryRecord(q, res.answer);
     } catch (err) {
       typingEl.remove();
-      appendMessage('ai', 'Error generating response: ' + (err.message || 'Server error'));
+      appendAiResponseCard('Error generating response: ' + (err.message || 'Server error'), currentState.filename, []);
     } finally {
       stateManager.update({ isBusy: false });
       qInput.disabled = false;
@@ -216,13 +241,13 @@ export function createPrediction() {
     }
   }
 
-  function appendMessage(role, text) {
+  function appendUserMessage(text) {
     const row = document.createElement('div');
-    row.className = `msg-row ${role}`;
+    row.className = 'msg-row user';
     
     const avatar = document.createElement('div');
     avatar.className = 'msg-avatar';
-    avatar.textContent = role === 'user' ? '🧑' : '🤖';
+    avatar.textContent = '🧑';
 
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
@@ -230,6 +255,133 @@ export function createPrediction() {
 
     row.appendChild(avatar);
     row.appendChild(bubble);
+    chatMessages.appendChild(row);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function appendAiResponseCard(answerText, filename, sources) {
+    const row = document.createElement('div');
+    row.className = 'msg-row ai';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'msg-avatar';
+    avatar.textContent = '🤖';
+
+    const card = document.createElement('div');
+    card.className = 'ai-response-card';
+
+    // 1. Header
+    const header = document.createElement('div');
+    header.className = 'ai-card-header';
+    header.innerHTML = `<span class="ai-badge">🤖 AI Assistant</span>`;
+
+    // 2. Body (Markdown rendered)
+    const body = document.createElement('div');
+    body.className = 'ai-card-body markdown-content';
+    body.innerHTML = parseMarkdown(answerText);
+
+    card.appendChild(header);
+    card.appendChild(body);
+
+    // 3. Sources Section (if metadata is available)
+    if (sources && sources.length > 0) {
+      const sourcesSec = document.createElement('div');
+      sourcesSec.className = 'ai-card-sources';
+      
+      let sourceItemsHtml = '';
+      const docName = filename || 'Document';
+      
+      const seen = new Set();
+      sources.forEach((s) => {
+        const pageLabel = (s.page !== null && s.page !== undefined && s.page !== '?') ? `Page ${typeof s.page === 'number' ? Math.floor(s.page) + 1 : s.page}` : '';
+        const chunkLabel = s.chunk ? `Chunk ${s.chunk}` : '';
+        const key = `${pageLabel}-${chunkLabel}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const metaStr = [pageLabel, chunkLabel].filter(Boolean).join(' · ') || 'Relevant Section';
+          sourceItemsHtml += `
+            <div class="source-item">
+              <div class="source-left">
+                <span class="source-doc-icon">📄</span>
+                <div class="source-info">
+                  <div class="source-filename">${escapeHtml(docName)}</div>
+                  <div class="source-meta">${metaStr}</div>
+                </div>
+              </div>
+              <button class="source-view-btn" onclick="alert('Viewing source context for ${escapeHtml(docName)}')">View Source</button>
+            </div>
+          `;
+        }
+      });
+
+      if (sourceItemsHtml) {
+        sourcesSec.innerHTML = `
+          <div class="sources-title">📚 Sources</div>
+          <div class="source-items">${sourceItemsHtml}</div>
+        `;
+        card.appendChild(sourcesSec);
+      }
+    }
+
+    // 4. Action Bar
+    const actionsBar = document.createElement('div');
+    actionsBar.className = 'ai-card-actions';
+
+    // Copy Button
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'action-btn';
+    copyBtn.innerHTML = '<span class="btn-icon">📋</span> Copy';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(answerText).then(() => {
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = '<span class="btn-icon">✓</span> Copied!';
+        showToast('Response copied to clipboard', 'info');
+        setTimeout(() => {
+          copyBtn.classList.remove('copied');
+          copyBtn.innerHTML = '<span class="btn-icon">📋</span> Copy';
+        }, 2000);
+      });
+    });
+
+    // Regenerate Button
+    const regenBtn = document.createElement('button');
+    regenBtn.className = 'action-btn';
+    regenBtn.innerHTML = '<span class="btn-icon">🔄</span> Regenerate';
+    regenBtn.addEventListener('click', () => {
+      if (lastSubmittedQuestion) {
+        submitQuestion(lastSubmittedQuestion);
+      }
+    });
+
+    // Thumbs Up Button
+    const thumbsUpBtn = document.createElement('button');
+    thumbsUpBtn.className = 'action-btn';
+    thumbsUpBtn.innerHTML = '<span class="btn-icon">👍</span> Helpful';
+    thumbsUpBtn.addEventListener('click', () => {
+      thumbsUpBtn.classList.toggle('active');
+      thumbsDownBtn.classList.remove('active');
+      showToast('Thanks for your feedback!', 'success');
+    });
+
+    // Thumbs Down Button
+    const thumbsDownBtn = document.createElement('button');
+    thumbsDownBtn.className = 'action-btn';
+    thumbsDownBtn.innerHTML = '<span class="btn-icon">👎</span> Not Helpful';
+    thumbsDownBtn.addEventListener('click', () => {
+      thumbsDownBtn.classList.toggle('active');
+      thumbsUpBtn.classList.remove('active');
+      showToast('Feedback noted. We will improve!', 'info');
+    });
+
+    actionsBar.appendChild(copyBtn);
+    actionsBar.appendChild(regenBtn);
+    actionsBar.appendChild(thumbsUpBtn);
+    actionsBar.appendChild(thumbsDownBtn);
+
+    card.appendChild(actionsBar);
+
+    row.appendChild(avatar);
+    row.appendChild(card);
     chatMessages.appendChild(row);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
@@ -242,15 +394,70 @@ export function createPrediction() {
     avatar.className = 'msg-avatar';
     avatar.textContent = '🤖';
 
-    const bubble = document.createElement('div');
-    bubble.className = 'msg-bubble';
-    bubble.innerHTML = `<span style="opacity:0.6;">Analyzing document context...</span>`;
+    const card = document.createElement('div');
+    card.className = 'ai-response-card';
+    card.innerHTML = `
+      <div class="ai-card-header"><span class="ai-badge">🤖 AI Assistant</span></div>
+      <div class="ai-card-body" style="opacity:0.7; font-style:italic;">
+        Analyzing document context and structuring answer...
+      </div>
+    `;
 
     row.appendChild(avatar);
-    row.appendChild(bubble);
+    row.appendChild(card);
     chatMessages.appendChild(row);
     chatMessages.scrollTop = chatMessages.scrollHeight;
     return row;
+  }
+
+  function escapeHtml(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function parseMarkdown(text) {
+    if (!text) return '';
+    if (window.marked && typeof window.marked.parse === 'function') {
+      try {
+        return window.marked.parse(text);
+      } catch (e) {
+        console.warn('Marked error:', e);
+      }
+    }
+    
+    // Fallback parser
+    let html = escapeHtml(text);
+    html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+    html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/^---$/gim, '<hr class="section-divider">');
+
+    const lines = html.split('\n');
+    let inList = false;
+    let listType = '';
+    let result = [];
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        if (!inList) { inList = true; listType = 'ul'; result.push('<ul>'); }
+        result.push(`<li>${trimmed.substring(2)}</li>`);
+      } else if (/^\d+\.\s/.test(trimmed)) {
+        if (!inList) { inList = true; listType = 'ol'; result.push('<ol>'); }
+        result.push(`<li>${trimmed.replace(/^\d+\.\s/, '')}</li>`);
+      } else {
+        if (inList) { inList = false; result.push(`</${listType}>`); }
+        if (trimmed && !trimmed.startsWith('<h') && !trimmed.startsWith('<hr')) {
+          result.push(`<p>${line}</p>`);
+        } else {
+          result.push(line);
+        }
+      }
+    });
+
+    if (inList) { result.push(`</${listType}>`); }
+    return result.join('\n');
   }
 
   function showToast(msg, type) {
