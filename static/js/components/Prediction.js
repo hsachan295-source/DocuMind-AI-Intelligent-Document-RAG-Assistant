@@ -191,7 +191,7 @@ export function createPrediction() {
       } catch (e) {
         console.error('Polling error:', e);
       }
-    }, 1500);
+    }, 400);
   }
 
   // Question Submission Logic

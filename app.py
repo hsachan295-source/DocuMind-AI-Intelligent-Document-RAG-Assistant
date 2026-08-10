@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from langchain_core.documents import Document
+import docx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import vectorstore, index as pinecone_index, add_documents_safely
 from rag_agent import ask, ask_with_sources
@@ -59,7 +61,13 @@ def _run_ingest(file_path: str) -> None:
     try:
         path_lower = file_path.lower()
         if path_lower.endswith(".docx") or path_lower.endswith(".doc"):
-            loader = Docx2txtLoader(file_path)
+            try:
+                doc = docx.Document(file_path)
+                full_text = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+                pages = [Document(page_content=full_text, metadata={"source": file_path, "page": 1})]
+            except Exception:
+                loader = Docx2txtLoader(file_path)
+                pages = loader.load()
         elif path_lower.endswith(".txt"):
             loader = TextLoader(file_path, encoding="utf-8")
         else:
